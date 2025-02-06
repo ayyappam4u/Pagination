@@ -1,0 +1,138 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<mule xmlns:vm="http://www.mulesoft.org/schema/mule/vm" xmlns:os="http://www.mulesoft.org/schema/mule/os"
+	xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+	xmlns:snowflake="http://www.mulesoft.org/schema/mule/snowflake" xmlns:http="http://www.mulesoft.org/schema/mule/http" xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:doc="http://www.mulesoft.org/schema/mule/documentation" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+http://www.mulesoft.org/schema/mule/snowflake http://www.mulesoft.org/schema/mule/snowflake/current/mule-snowflake.xsd
+http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd
+http://www.mulesoft.org/schema/mule/os http://www.mulesoft.org/schema/mule/os/current/mule-os.xsd
+http://www.mulesoft.org/schema/mule/vm http://www.mulesoft.org/schema/mule/vm/current/mule-vm.xsd">
+	<http:listener-config name="HTTP_Listener_config" doc:name="HTTP Listener config" doc:id="afdd48bf-4f25-4e7d-ba94-6dee6215bdab" >
+		<http:listener-connection host="0.0.0.0" port="8081" />
+	</http:listener-config>
+	<snowflake:snowflake-config name="Snowflake_Config" doc:name="Snowflake Config" doc:id="6d75a9cc-9b62-48c9-a9f2-66bf93b72191" >
+		<snowflake:snowflake-connection accountName="${snowflake.accountName}" warehouse="${snowflake.warehouse}" database="${snowflake.db}" schema="${snowflake.schema}" user="${snowflake.user}" password="${snowflake.password}" role="${snowflake.role}"/>
+	</snowflake:snowflake-config>
+	<snowflake:snowflake-config name="Snowflake_Config1" doc:name="Snowflake Config" doc:id="b675f55b-7f15-4fff-a280-e05a9a6cb67f" >
+		<snowflake:snowflake-connection accountName="${snowflake.accountName}" warehouse="${snowflake.warehouse}" database="${snowflake.db1}" schema="${snowflake.schema1}" user="${snowflake.user}" password="${snowflake.password}" role="${snowflake.role}"/>
+	</snowflake:snowflake-config>	<os:object-store name="Object_store" doc:name="Object store" doc:id="027a861c-4a48-4861-bbf8-605ad6d99f2a" />
+	<vm:config name="VM_Config" doc:name="VM Config" doc:id="16a7bebb-e84b-40cd-b902-1d44a10b4767" >
+		<vm:queues >
+			<vm:queue queueName="firstQueue" maxOutstandingMessages="30" />
+		</vm:queues>
+	</vm:config>
+	<configuration-properties doc:name="Configuration properties" doc:id="0caee886-0d7e-45e1-b06f-59e4b9afc38b" file="config.properties" />
+	<flow name="paginationFlow" doc:id="5ca998fc-a91d-4103-9b5b-720ac3bd78ed" >
+		<vm:listener doc:name="Listener" doc:id="d51ad86c-7e02-4777-bd2c-577fd7bbfaa7" config-ref="VM_Config" queueName="firstQueue" timeoutUnit="MINUTES"/>
+		<!-- [STUDIO:"Listener"]<http:listener doc:name="Listener" doc:id="d2842208-90ad-4bdf-8dc8-1689d48cff95" config-ref="HTTP_Listener_config" path="/page"/> [STUDIO] -->
+		<logger level="INFO" doc:name="Logger" doc:id="69219207-1297-465b-8755-ad674630cdfd" message="#[attributes.queryParams.limit]"/>
+		<set-variable value="14000" doc:name="Set Variable" doc:id="4fe5aaf1-0d27-4fc7-a8af-8ea38e63d431" variableName="limit"/>
+		<os:retrieve doc:name="Retrieve" doc:id="82a7dec2-43db-4926-a638-c8158403bfa9" key="offset" objectStore="Object_store" target="offset">
+			<os:default-value ><![CDATA[0]]></os:default-value>
+		</os:retrieve>
+		<snowflake:select doc:name="Select" doc:id="6a3d2cda-cb36-4133-8543-5fe14a1b85f5" config-ref="Snowflake_Config">
+			<snowflake:sql ><![CDATA[#["SELECT * 
+            FROM SNOWFLAKE_SAMPLE_DATA.TPCH_SF1.CUSTOMER
+            LIMIT " ++ vars.limit as String ++ " OFFSET " ++ vars.offset as String]]]></snowflake:sql>
+		</snowflake:select>
+		<ee:transform doc:name="Transform Message" doc:id="0f6857e4-b41f-426f-87e0-91e40c5cb4ec">
+			<ee:message>
+				<ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+payload]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+		<os:retrieve doc:name="Retrieve" doc:id="55f57220-ed70-4e6d-9ed2-11da3f6d55b0" key="counter" target="counter" objectStore="Object_store">
+			<os:default-value><![CDATA[0]]></os:default-value>
+		</os:retrieve>
+		<!-- [STUDIO:"Clear"]<os:clear doc:name="Clear" doc:id="d8e7af19-ed7a-45f0-bcae-2e2f7fcbcf08" objectStore="Object_store" /> [STUDIO] -->
+		<logger level="INFO" doc:name="Logger" doc:id="b8516eb0-df7a-4dda-8c09-0501a5ee6191" message='#["jhchjhjvbfvbjkbvjkcxb:" ++ vars.counter as String ++ vars.offset as String]'/>
+		<choice doc:name="Choice" doc:id="692b2fa7-f356-4283-a871-c49d90a325e9" >
+			<when expression="#[%dw 2.0&#10;output json&#10;---&#10;//sizeOf(payload) == vars.limit&#10;!isEmpty(payload) and (sizeOf(payload) == vars.limit as Number)]">
+				<snowflake:bulk-insert doc:name="Bulk insert" doc:id="3d52cd1e-5294-425e-acb0-62a3a033ce5c" config-ref="Snowflake_Config1">
+				<snowflake:bulk-input-parameters><![CDATA[#[%dw 2.0
+output application/json
+---
+payload map{
+"custKey": $.C_CUSTKEY,
+    "name": $.C_NAME,
+    "address": $.C_ADDRESS,
+    "nationKey":$.C_NATIONKEY,
+    "phone": $.C_PHONE,
+    "acctBal": $.C_ACCTBAL,
+    "mktSegment": $.C_MKTSEGMENT,
+    "comment": $.C_COMMENT
+    
+    }]]]></snowflake:bulk-input-parameters>
+				<snowflake:sql><![CDATA[insert into T2CUSTOMER(C_CUSTKEY,C_NAME,C_ADDRESS,C_NATIONKEY,C_PHONE,C_ACCTBAL,C_MKTSEGMENT,C_COMMENT
+) values(:custKey,:name,:address,:nationKey,:phone,:acctBal,:mktSegment,:comment)]]></snowflake:sql>
+			</snowflake:bulk-insert>
+				<os:store doc:name="Store" doc:id="c377e6a7-564d-4ba5-a5bb-4198f8dcc87f" key="offset" objectStore="Object_store">
+					<os:value ><![CDATA[#[vars.offset + vars.limit]]]></os:value>
+				</os:store>
+				<os:store doc:name="Store" doc:id="4b0b1236-ce70-4dec-812b-ee93dc702868" key="counter" objectStore="Object_store">
+					<os:value><![CDATA[#[vars.counter as Number + 1]]]></os:value>
+				</os:store>
+				<vm:publish doc:name="Publish" doc:id="b73d97fb-706a-496d-b618-0d35301abe13" config-ref="VM_Config" queueName="firstQueue" />
+				<logger level="INFO" doc:name="Logger" doc:id="fca97a76-547d-4a6a-a673-29553555cccf" message="------------------------------first route-----------------"/>
+			</when>
+			<when expression="#[%dw 2.0&#10;output json&#10;---&#10;//sizeOf(payload) == vars.limit&#10;!isEmpty(payload) and (sizeOf(payload) &lt; vars.limit as Number)]">
+				<snowflake:bulk-insert doc:name="Bulk insert1" doc:id="f416e407-442b-42fd-a774-22e19a9a0d9d" config-ref="Snowflake_Config1">
+					<snowflake:bulk-input-parameters><![CDATA[#[%dw 2.0
+output application/json
+---
+payload map{
+"custKey": $.C_CUSTKEY,
+    "name": $.C_NAME,
+    "address": $.C_ADDRESS,
+    "nationKey":$.C_NATIONKEY,
+    "phone": $.C_PHONE,
+    "acctBal": $.C_ACCTBAL,
+    "mktSegment": $.C_MKTSEGMENT,
+    "comment": $.C_COMMENT
+    
+    }]]]></snowflake:bulk-input-parameters>
+					<snowflake:sql><![CDATA[insert into T2CUSTOMER(C_CUSTKEY,C_NAME,C_ADDRESS,C_NATIONKEY,C_PHONE,C_ACCTBAL,C_MKTSEGMENT,C_COMMENT
+) values(:custKey,:name,:address,:nationKey,:phone,:acctBal,:mktSegment,:comment)]]></snowflake:sql>
+				</snowflake:bulk-insert>
+				<os:clear doc:name="Clear" doc:id="07058ee5-16e2-4946-8268-b12536136fa5" objectStore="Object_store"/>
+				<logger level="INFO" doc:name="Logger" doc:id="a5bbfbf8-2098-4684-ba5d-60e42fdde4e9" message="----------------second route"/>
+			</when>
+			<otherwise >
+				<logger level="INFO" doc:name="Logger" doc:id="3b7114b1-43d0-4ac0-a766-97ad475526f3" message="---------------------------default route-----------------------"/>
+				<os:clear doc:name="Clear1" doc:id="421711cb-e0bf-4467-872d-b2061a9f0ea8" objectStore="Object_store" />
+			</otherwise>
+		</choice>
+		<!-- [STUDIO:"For Each"]<foreach doc:name="For Each" doc:id="e6b1703f-973f-4244-9652-c280762c1dca" >
+			<snowflake:insert doc:name="Insert" doc:id="640bf1ea-59b4-43e4-93ad-7ac72b7ae9ea" config-ref="Snowflake_Config1">
+			<snowflake:sql><![CDATA[insert into T2CUSTOMER(C_CUSTKEY,C_NAME,C_ADDRESS,C_NATIONKEY,C_PHONE,C_ACCTBAL,C_MKTSEGMENT,C_COMMENT
+) values(:custKey,:name,:address,:nationKey,:phone,:acctBal,:mktSegment,:comment)&#93;&#93;></snowflake:sql>
+			<snowflake:input-parameters><![CDATA[#[%dw 2.0
+output application/json
+&#45;&#45;-
+{
+"custKey": payload.C_CUSTKEY,
+    "name": payload.C_NAME,
+    "address": payload.C_ADDRESS,
+    "nationKey":payload.C_NATIONKEY,
+    "phone": payload.C_PHONE,
+    "acctBal": payload.C_ACCTBAL,
+    "mktSegment": payload.C_MKTSEGMENT,
+    "comment": payload.C_COMMENT
+    
+    }&#93;&#93;&#93;></snowflake:input-parameters>
+		</snowflake:insert>
+		</foreach> [STUDIO] -->
+		<logger level="INFO" doc:name="Logger" doc:id="56c39df7-1581-4b12-923a-50f7d3be6c0f" message='#["flow stopped"]'/>
+	</flow>
+	<flow name="paginationFlow2" doc:id="c77d1cd5-1d97-43d3-a330-66f92208ab38" >
+		<http:listener doc:name="Listener" doc:id="829d582c-cadf-4755-ae54-fea5fa0b5096" config-ref="HTTP_Listener_config" path="/page" />
+		<vm:publish doc:name="Publish" doc:id="d9615d3d-c1e4-41b1-bcc6-f0cc2050b788" config-ref="VM_Config" queueName="firstQueue"/>
+	</flow>
+	<flow name="paginationFlow1" doc:id="1293ef22-08f7-4d3a-ba96-ee8df8571359" >
+		<http:listener doc:name="Listener" doc:id="45899457-4d9f-46a0-9213-54d794e56951" config-ref="HTTP_Listener_config" path="/clear"/>
+		<os:clear doc:name="Clear" doc:id="19184e7e-d557-4534-9b72-8f789cc1a83c" objectStore="Object_store"/>
+	</flow>
+</mule>
